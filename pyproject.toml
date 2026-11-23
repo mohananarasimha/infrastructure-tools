@@ -1,0 +1,60 @@
+[build-system]
+requires = ["hatchling>=1.25"]
+build-backend = "hatchling.build"
+
+[project]
+name = "infrastructure-tools"
+version = "0.1.0"
+description = "Focused CLI utilities for Kubernetes reliability, data infrastructure, and AI inference diagnostics."
+readme = "README.md"
+license = { file = "LICENSE" }
+requires-python = ">=3.11"
+authors = [{ name = "Mohana Narasimha" }]
+dependencies = [
+  "pydantic>=2.7",
+  "pyyaml>=6.0",
+  "rich>=13.7",
+  "typer>=0.12",
+]
+
+[project.optional-dependencies]
+dev = [
+  "mypy>=1.10",
+  "pytest>=8.0",
+  "pytest-asyncio>=0.24",
+  "ruff>=0.8",
+  "types-PyYAML>=6.0",
+]
+
+[project.scripts]
+k8s-guard = "infra_tools.k8s_guard.cli:app"
+infra-tools = "infra_tools.cli:app"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/infra_tools"]
+
+[tool.ruff]
+target-version = "py311"
+line-length = 100
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM", "S", "RUF"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**/*.py" = ["S101"]
+
+[tool.mypy]
+python_version = "3.11"
+strict = true
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = true
+mypy_path = "src"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_default_fixture_loop_scope = "function"
+markers = [
+  "integration: tests requiring local containers or clusters (kind, Docker Postgres, mock servers)",
+]

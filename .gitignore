@@ -1,0 +1,26 @@
+# Python virtual environments and caches
+.venv/
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+
+# Packaging / build outputs
+build/
+dist/
+*.egg-info/
+
+# Secrets, credentials, and local configs
+.env
+.env.*
+*.pem
+*.key
+kubeconfig*
+
+# OS and temporary files
+.DS_Store
+tmp/

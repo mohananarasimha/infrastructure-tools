@@ -1,0 +1,34 @@
+name: CI
+
+on:
+  push:
+    branches: ["main"]
+  pull_request:
+    branches: ["main"]
+
+permissions:
+  contents: read
+
+jobs:
+  lint-typecheck-test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Sync dependencies (Python 3.12)
+        run: uv sync --python 3.12 --extra dev
+
+      - name: Run Ruff lint
+        run: uv run ruff check .
+
+      - name: Run Mypy type check
+        run: uv run mypy src
+
+      - name: Run unit tests
+        run: uv run pytest -v

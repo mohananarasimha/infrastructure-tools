@@ -1,0 +1,9 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: broken-yaml
+spec:
+  replicas: [1, 2
+  template:
+    metadata:
+      labels: {app: broken
