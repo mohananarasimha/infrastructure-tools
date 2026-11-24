@@ -47,9 +47,9 @@ Run `k8s-guard` locally, in pre-commit hooks, or in CI/CD pipelines against raw 
 | `KG003` | `MEDIUM` | Missing `readinessProbe` on `Deployment`/`StatefulSet` container |
 | `KG004` | `MEDIUM` | Missing `livenessProbe` on `Deployment`/`StatefulSet` container |
 | `KG005` | `CRITICAL` / `HIGH` | `privileged: true` (`CRITICAL`) or missing `runAsNonRoot: true`, `allowPrivilegeEscalation: false`, or `capabilities.drop: [ALL]` (`HIGH`) |
-| `KG006` | `MEDIUM` | `Deployment`/`StatefulSet` with `replicas > 1` lacking a namespace- and selector-matched `PodDisruptionBudget` |
+| `KG006` | `MEDIUM` | `Deployment`/`StatefulSet` with effective min replicas `> 1` (`max(spec.replicas or 1, autoscaling/v2 HPA minReplicas)`) lacking a namespace- and selector-matched `PodDisruptionBudget` |
 | `KG007` | `HIGH` / `MEDIUM` | GPU hygiene: `nvidia.com/gpu` `requests == limits` and `> 0` (`HIGH`); missing GPU `tolerations` or `nodeSelector`/`affinity.nodeAffinity` (`MEDIUM`) |
-| `KG008` | `LOW` | `Deployment` with `replicas > 1` missing `readOnlyRootFilesystem: true` |
+| `KG008` | `LOW` | Non-init container on any pod workload missing `securityContext.readOnlyRootFilesystem: true` |
 
 ### Installation
 
@@ -62,7 +62,7 @@ uv sync --extra dev
 ### Usage
 
 ```bash
-# Scan a single manifest file (Rich table output)
+# Scan a single manifest file (readable non-truncating text blocks)
 uv run k8s-guard scan tests/fixtures/k8s_guard/hardened_deployment.yaml
 
 # Scan a directory of manifests with JSON output for CI
@@ -79,6 +79,63 @@ uv run k8s-guard rules
 
 # Unified dispatcher entrypoint
 uv run infra-tools k8s-guard scan tests/fixtures/k8s_guard/hardened_deployment.yaml
+```
+
+### Example Output (`--format table`, `COLUMNS=80`)
+
+```text
+k8s-guard target=tests/fixtures/k8s_guard/broken_workload.yaml scanned=1 
+findings=8 status=FAIL
+
+CRITICAL  KG005  Deployment/default/web-frontend
+  location: tests/fixtures/k8s_guard/broken_workload.yaml:20
+  message:  container 'web' runs with securityContext.privileged=true.
+  fix:      Remove privileged: true and grant only minimal required 
+capabilities.
+
+HIGH      KG001  Deployment/default/web-frontend
+  location: tests/fixtures/k8s_guard/broken_workload.yaml:18
+  message:  container 'web' uses unpinned image 'nginx:latest'.
+  fix:      Pin image to an immutable version tag or '@sha256:...' digest.
+
+HIGH      KG002  Deployment/default/web-frontend
+  location: tests/fixtures/k8s_guard/broken_workload.yaml:17
+  message:  container 'web' is missing resource constraints: requests.cpu, 
+requests.memory, limits.cpu, limits.memory.
+  fix:      Set explicit cpu and memory values under resources.requests and 
+resources.limits.
+
+HIGH      KG005  Deployment/default/web-frontend
+  location: tests/fixtures/k8s_guard/broken_workload.yaml:20
+  message:  container 'web' is missing securityContext hardening: runAsNonRoot: 
+true, allowPrivilegeEscalation: false, capabilities.drop: [ALL].
+  fix:      Set runAsNonRoot: true, allowPrivilegeEscalation: false, and 
+capabilities.drop: [ALL].
+
+MEDIUM    KG003  Deployment/default/web-frontend
+  location: tests/fixtures/k8s_guard/broken_workload.yaml:17
+  message:  container 'web' is missing a readinessProbe.
+  fix:      Configure a readinessProbe so traffic is only routed to ready pods.
+
+MEDIUM    KG004  Deployment/default/web-frontend
+  location: tests/fixtures/k8s_guard/broken_workload.yaml:17
+  message:  container 'web' is missing a livenessProbe.
+  fix:      Configure a livenessProbe so deadlocked containers are restarted.
+
+MEDIUM    KG006  Deployment/default/web-frontend
+  location: tests/fixtures/k8s_guard/broken_workload.yaml:7
+  message:  Deployment with replicas=3 has no matching PodDisruptionBudget in 
+scanned manifests.
+  fix:      Define a PodDisruptionBudget in the same namespace with a selector 
+matching the workload pod template labels.
+
+LOW       KG008  Deployment/default/web-frontend
+  location: tests/fixtures/k8s_guard/broken_workload.yaml:20
+  message:  container 'web' is missing readOnlyRootFilesystem: true.
+  fix:      Set securityContext.readOnlyRootFilesystem: true and mount emptyDir 
+volumes for writable scratch paths.
+
+Summary: CRITICAL=1  HIGH=3  MEDIUM=3  LOW=1
 ```
 
 ### Example Output (`--format json`)
@@ -169,14 +226,14 @@ Run `k8s-triage` read-only against a live Kubernetes cluster (with bounded API t
 
 | Rule ID | Severity | Check |
 | --- | --- | --- |
-| `KT001` | `CRITICAL` | Container `OOMKilled` (`reason == OOMKilled` or exit code `137`) correlated with pod events and declared memory limits |
-| `KT002` | `HIGH` | `CrashLoopBackOff` with restart count, last termination reason/exit code, and correlated warning events |
+| `KT001` | `CRITICAL` | Container `OOMKilled` (`reason == OOMKilled` or exit code `137`) correlated with pod events, declared memory limits, and CrashLoopBackOff/restart state (supersedes `KT002` and `KT008` for the same container) |
+| `KT002` | `HIGH` | Non-OOM `CrashLoopBackOff` with restart count, last termination reason/exit code, and correlated warning events (supersedes `KT008` for the same container) |
 | `KT003` | `HIGH` | `ImagePullBackOff` / `ErrImagePull` with failing image reference and correlated pull error event |
 | `KT004` | `HIGH` | `CreateContainerConfigError` / `CreateContainerError` (missing ConfigMap/Secret or runtime constraint) |
 | `KT005` | `HIGH` | Unschedulable `Pending` pod (`PodScheduled=False` / `FailedScheduling`), distinguishing GPU/CPU/memory insufficiency vs taint/affinity mismatch |
 | `KT006` | `MEDIUM` | Failing readiness/liveness/startup probe (`Unhealthy` warning events) with event count and latest failure message |
 | `KT007` | `CRITICAL` / `HIGH` | Unhealthy `Node` (`Ready != True` -> `CRITICAL`; `MemoryPressure`/`DiskPressure`/`PIDPressure` -> `HIGH`), listing scheduled pods on the node |
-| `KT008` | `MEDIUM` | High container restart count (`>= 3`), including currently `Running` containers to catch silent instability |
+| `KT008` | `MEDIUM` | High container restart count (`>= 3`) not already covered by `KT001`/`KT002` (such as currently `Running` containers) to catch silent instability |
 
 ### Usage
 
@@ -198,6 +255,31 @@ uv run k8s-triage rules
 
 # Unified dispatcher entrypoint
 uv run infra-tools k8s-triage inspect --fixture tests/fixtures/k8s_triage/healthy_cluster.json
+```
+
+### Example Output (`--format table`, `COLUMNS=80`)
+
+```text
+k8s-triage target=tests/fixtures/k8s_triage/oom_and_crashloop.json scanned=3 
+findings=2 status=FAIL
+
+CRITICAL  KT001  Pod/ml-serving/embedding-worker-7c9d4f8b2-x9k2p
+  location: container/worker
+  message:  Container 'worker' was OOMKilled (also in CrashLoopBackOff, 
+restarts=6, memory limit=512Mi). Event: BackOff - Back-off restarting failed 
+container worker in pod embedding-worker-7c9d4f8b2-x9k2p
+  fix:      Profile container memory usage for leaks, raise 
+resources.limits.memory, and align runtime heap/KV-cache ceilings with the 
+cgroup limit.
+
+MEDIUM    KT008  Pod/production/cache-proxy-9b4a2f1d-m3q1z
+  location: container/proxy
+  message:  Container 'proxy' has 4 restarts (current state=running, 
+last_reason=Error).
+  fix:      Investigate recurring container restarts even if currently Running 
+to eliminate silent crash loops or liveness-probe flaps.
+
+Summary: CRITICAL=1  MEDIUM=1
 ```
 
 ### Example Output (`--format json`)

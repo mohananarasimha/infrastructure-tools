@@ -16,7 +16,7 @@
 All utilities under `src/infra_tools/` share primitives from `src/infra_tools/core/`:
 
 - **Output formats**: `--format table|json`
-  - `table`: Rich formatted terminal table for human operators.
+  - `table`: Non-truncating Rich text blocks (`severity  rule  resource` followed by indented `location:`, `message:`, `fix:` lines) for human operators.
   - `json`: Deterministic `ToolReport.model_dump_json(indent=2)` written directly to stdout without ANSI codes or line wrapping.
 - **Exit codes** (`ExitCode`):
   - `0` (`OK`): Passed / no findings at or above the configured failure threshold.
