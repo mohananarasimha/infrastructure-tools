@@ -9,11 +9,12 @@ flowchart LR
     CLI["Unified CLI (infra-tools) & Tool Entrypoints"] --> CORE["Shared Core (core/models.py, core/output.py)"]
     CLI --> KG["k8s-guard\nStatic K8s & GPU Linter"]
     CLI --> KT["k8s-triage\nPod/Event/Node Correlator"]
-    CLI --> IB["infer-bench (Planned)\nSSE/vLLM Latency & SLO Probe"]
+    CLI --> IB["infer-bench\nSSE/vLLM Latency & SLO Probe"]
     CLI --> PG["pg-diag (Planned)\nPostgres Lock & Pool Analyzer"]
 
     KG --> OUT["Deterministic Output\n--format table | json\nExit Codes: 0 / 1 / 2"]
     KT --> OUT
+    IB --> OUT
     CORE --> OUT
 ```
 
@@ -23,7 +24,7 @@ flowchart LR
 | --- | --- | --- | --- |
 | `k8s-guard` | Platform / SRE / ML Platform | **Complete** | Static reliability, security, and GPU-hygiene linter for YAML manifests and `helm template` output |
 | `k8s-triage` | SRE / Platform / AI Infra | **Complete** | Correlates unhealthy pods, events, probe failures, and node pressure with offline `--fixture` replay |
-| `infer-bench` | AI Infra / AI Reliability | Planned | Async SSE streaming benchmark measuring TTFT, ITL, tok/s, error rates, and SLO gates for OpenAI/vLLM APIs |
+| `infer-bench` | AI Infra / AI Reliability | **Complete** | Async SSE streaming benchmark measuring TTFT, ITL, tok/s, error rates, and SLO gates for OpenAI/vLLM APIs |
 | `pg-diag` | SRE / Data Infra | Planned | Read-only PostgreSQL analyzer for blocking lock chains, connection saturation, and idle-in-transaction leaks |
 
 ---
@@ -352,4 +353,26 @@ uv run pytest -v
 
 - Run with a read-only `ServiceAccount` granted `get`/`list` on `pods`, `events`, and optionally `nodes` (no `secrets` or write verbs required).
 - Use `k8s-triage inspect --format json` in post-deploy smoke checks or incident runbooks to capture reproducible triage reports without mutating cluster state.
+
+---
+
+## Tool 3: `infer-bench`
+
+See [`src/infra_tools/infer_bench/README.md`](src/infra_tools/infer_bench/README.md) for full metric definitions, coordinated-omission rationale, mock server options, real 80-column text/JSON examples, and limitations.
+
+### Quick Start
+
+```bash
+# Terminal 1: start the local 127.0.0.1 OpenAI-compatible SSE mock server
+uv run infer-bench mock --port 18081 --ttft-ms 45 --itl-ms 8 --tokens 8 \
+  --stall-ms 85 --stall-at 4 --error-429-rate 0.25 --seed 7
+
+# Terminal 2: run an open-loop benchmark with SLO gates
+uv run infer-bench run --url http://127.0.0.1:18081 --model llama-3.1-8b \
+  --requests 8 --rate 20 --slo-ttft-p95-ms 40 --slo-itl-p99-ms 50 --max-error-rate 0.05
+
+# List built-in SLO rules (IB001-IB007)
+uv run infer-bench rules
+```
+
 
