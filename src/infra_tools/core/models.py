@@ -105,7 +105,7 @@ class ToolReport(BaseModel):
         """Construct a deterministically sorted report and compute pass/fail status."""
         sorted_findings = sorted(
             findings,
-            key=lambda f: (-f.severity.rank, f.location, f.rule_id, f.resource, f.message),
+            key=lambda f: (-f.severity.rank, f.rule_id, f.resource, f.location, f.message),
         )
         counts: dict[str, int] = {sev.value: 0 for sev in ORDERED_SEVERITIES}
         for finding in sorted_findings:
