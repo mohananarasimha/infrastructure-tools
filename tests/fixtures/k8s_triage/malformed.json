@@ -1,0 +1,5 @@
+{
+  "source": "fixture:malformed",
+  "pods": [
+    { "name": "broken-json"
+}

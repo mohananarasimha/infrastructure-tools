@@ -1,0 +1,84 @@
+{
+  "source": "fixture:healthy-cluster",
+  "namespace": "production",
+  "pods": [
+    {
+      "name": "api-server-6d8f9b7c4-abc12",
+      "namespace": "production",
+      "phase": "Running",
+      "node_name": "worker-cpu-01",
+      "conditions": [
+        { "type": "PodScheduled", "status": "True" },
+        { "type": "Initialized", "status": "True" },
+        { "type": "ContainersReady", "status": "True" },
+        { "type": "Ready", "status": "True" }
+      ],
+      "containers": [
+        {
+          "name": "api",
+          "image": "ghcr.io/example-org/api-server:1.4.2",
+          "ready": true,
+          "restart_count": 0,
+          "state": "running",
+          "memory_limit": "512Mi",
+          "cpu_limit": "500m"
+        }
+      ]
+    },
+    {
+      "name": "api-server-6d8f9b7c4-def34",
+      "namespace": "production",
+      "phase": "Running",
+      "node_name": "worker-cpu-02",
+      "conditions": [
+        { "type": "PodScheduled", "status": "True" },
+        { "type": "Ready", "status": "True" }
+      ],
+      "containers": [
+        {
+          "name": "api",
+          "image": "ghcr.io/example-org/api-server:1.4.2",
+          "ready": true,
+          "restart_count": 1,
+          "state": "running",
+          "memory_limit": "512Mi",
+          "cpu_limit": "500m"
+        }
+      ]
+    }
+  ],
+  "events": [
+    {
+      "namespace": "production",
+      "involved_kind": "Pod",
+      "involved_name": "api-server-6d8f9b7c4-abc12",
+      "event_type": "Normal",
+      "reason": "Started",
+      "message": "Started container api",
+      "count": 1,
+      "last_timestamp": "2026-11-24T10:00:00Z"
+    }
+  ],
+  "nodes": [
+    {
+      "name": "worker-cpu-01",
+      "unschedulable": false,
+      "conditions": [
+        { "type": "Ready", "status": "True", "reason": "KubeletReady" },
+        { "type": "MemoryPressure", "status": "False" },
+        { "type": "DiskPressure", "status": "False" },
+        { "type": "PIDPressure", "status": "False" }
+      ]
+    },
+    {
+      "name": "worker-cpu-02",
+      "unschedulable": false,
+      "conditions": [
+        { "type": "Ready", "status": "True", "reason": "KubeletReady" },
+        { "type": "MemoryPressure", "status": "False" },
+        { "type": "DiskPressure", "status": "False" },
+        { "type": "PIDPressure", "status": "False" }
+      ]
+    }
+  ]
+}

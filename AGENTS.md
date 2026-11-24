@@ -7,7 +7,7 @@ Instructions for coding agents working in `infrastructure-tools`.
 This repository implements four standalone Python CLI utilities inside one `uv`-managed package (`src/infra_tools/`):
 
 - `k8s-guard` (Complete): Static K8s manifest reliability, security, and GPU-hygiene linter.
-- `k8s-triage` (Planned): K8s pod, event, probe, and node-condition root-cause correlator.
+- `k8s-triage` (Complete): K8s pod, event, probe, and node-condition root-cause correlator.
 - `infer-bench` (Planned): Async streaming TTFT/ITL/throughput and reliability analyzer for OpenAI-compatible/vLLM endpoints.
 - `pg-diag` (Planned): Read-only PostgreSQL lock-tree, pool-saturation, and idle-in-transaction diagnostics.
 
