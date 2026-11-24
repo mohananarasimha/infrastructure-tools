@@ -73,7 +73,8 @@ RULE_CATALOG: tuple[RuleSpec, ...] = (
         title="Missing PodDisruptionBudget for multi-replica workload",
         description=(
             "Requires a matching PodDisruptionBudget (same namespace and label selector) "
-            "for Deployment/StatefulSet with replicas > 1."
+            "for Deployment/StatefulSet with effective min replicas > 1 "
+            "(spec.replicas or autoscaling/v2 HPA minReplicas)."
         ),
     ),
     RuleSpec(
@@ -88,8 +89,10 @@ RULE_CATALOG: tuple[RuleSpec, ...] = (
     RuleSpec(
         rule_id="KG008",
         severity=Severity.LOW,
-        title="Writable root filesystem on replicated Deployment",
-        description="Flags Deployment (replicas > 1) containers without readOnlyRootFilesystem.",
+        title="Writable root filesystem",
+        description=(
+            "Flags non-init containers without securityContext.readOnlyRootFilesystem: true."
+        ),
     ),
 )
 
@@ -100,6 +103,7 @@ VALID_RULE_IDS: frozenset[str] = frozenset(spec.rule_id for spec in RULE_CATALOG
 class _PodTarget:
     doc: ParsedDocument
     kind: str
+    name: str
     namespace: str
     resource_id: str
     replicas: int
@@ -140,14 +144,16 @@ def _extract_labels(metadata: dict[str, Any]) -> dict[str, str]:
 
 def _extract_pod_target(doc: ParsedDocument) -> _PodTarget | None:
     kind = str(doc.data.get("kind") or "")
+    metadata = _as_dict(doc.data.get("metadata"))
+    name = str(metadata.get("name") or "<unnamed>")
     namespace, resource_id = _extract_resource_id(doc.data)
     spec = _as_dict(doc.data.get("spec"))
 
     if kind == "Pod":
-        metadata = _as_dict(doc.data.get("metadata"))
         return _PodTarget(
             doc=doc,
             kind=kind,
+            name=name,
             namespace=namespace,
             resource_id=resource_id,
             replicas=1,
@@ -163,6 +169,7 @@ def _extract_pod_target(doc: ParsedDocument) -> _PodTarget | None:
         return _PodTarget(
             doc=doc,
             kind=kind,
+            name=name,
             namespace=namespace,
             resource_id=resource_id,
             replicas=_extract_replicas(spec),
@@ -180,6 +187,7 @@ def _extract_pod_target(doc: ParsedDocument) -> _PodTarget | None:
         return _PodTarget(
             doc=doc,
             kind=kind,
+            name=name,
             namespace=namespace,
             resource_id=resource_id,
             replicas=1,
@@ -280,6 +288,32 @@ def _collect_pdbs(documents: list[ParsedDocument]) -> list[tuple[str, Any]]:
         if "selector" in spec:
             pdbs.append((namespace, spec["selector"]))
     return pdbs
+
+
+def _collect_hpa_min_replicas(documents: list[ParsedDocument]) -> dict[tuple[str, str, str], int]:
+    """Map ``(namespace, target_kind, target_name)`` to max autoscaling/v2 HPA minReplicas."""
+    hpa_mins: dict[tuple[str, str, str], int] = {}
+    for doc in documents:
+        if (
+            doc.data.get("kind") != "HorizontalPodAutoscaler"
+            or doc.data.get("apiVersion") != "autoscaling/v2"
+        ):
+            continue
+        namespace, _ = _extract_resource_id(doc.data)
+        spec = _as_dict(doc.data.get("spec"))
+        scale_ref = _as_dict(spec.get("scaleTargetRef"))
+        ref_kind = str(scale_ref.get("kind") or "")
+        ref_name = str(scale_ref.get("name") or "")
+        if not ref_kind or not ref_name:
+            continue
+
+        raw_min = spec.get("minReplicas")
+        min_replicas = (
+            raw_min if isinstance(raw_min, int) and not isinstance(raw_min, bool) else 1
+        )
+        key = (namespace, ref_kind, ref_name)
+        hpa_mins[key] = max(hpa_mins.get(key, 1), min_replicas)
+    return hpa_mins
 
 
 def _check_container_rules(
@@ -449,23 +483,15 @@ def _check_container_rules(
                 )
             )
 
-    # KG008: readOnlyRootFilesystem on Deployment with replicas > 1
-    if (
-        not is_init
-        and target.kind == "Deployment"
-        and target.replicas > 1
-        and container_sc.get("readOnlyRootFilesystem") is not True
-    ):
+    # KG008: readOnlyRootFilesystem on all non-init containers across all pod workloads
+    if not is_init and container_sc.get("readOnlyRootFilesystem") is not True:
         findings.append(
             Finding(
                 rule_id="KG008",
                 severity=Severity.LOW,
                 resource=target.resource_id,
                 location=doc.location_for((*container_path, "securityContext")),
-                message=(
-                    f"{container_label} on replicated Deployment (replicas={target.replicas}) "
-                    "is missing readOnlyRootFilesystem: true."
-                ),
+                message=f"{container_label} is missing readOnlyRootFilesystem: true.",
                 remediation=(
                     "Set securityContext.readOnlyRootFilesystem: true and mount emptyDir volumes "
                     "for writable scratch paths."
@@ -520,6 +546,7 @@ def evaluate_documents(
     """Evaluate all k8s-guard rules across a set of parsed Kubernetes documents."""
     ignored = {rule.upper() for rule in (ignore_rules or set())}
     pdbs = _collect_pdbs(documents)
+    hpa_min_replicas = _collect_hpa_min_replicas(documents)
     findings: list[Finding] = []
 
     for doc in documents:
@@ -547,12 +574,21 @@ def evaluate_documents(
             findings.extend(_check_gpu_scheduling(target))
 
         # KG006: PodDisruptionBudget coverage for multi-replica Deployment/StatefulSet
-        if target.kind in PDB_REQUIRED_KINDS and target.replicas > 1:
+        # Consider both spec.replicas (default 1) and autoscaling/v2 HPA minReplicas.
+        hpa_min = hpa_min_replicas.get((target.namespace, target.kind, target.name), 1)
+        effective_replicas = max(target.replicas, hpa_min)
+        if target.kind in PDB_REQUIRED_KINDS and effective_replicas > 1:
             has_matching_pdb = any(
                 pdb_ns == target.namespace and _selector_matches_labels(selector, target.pod_labels)
                 for pdb_ns, selector in pdbs
             )
             if not has_matching_pdb:
+                if hpa_min > target.replicas:
+                    replica_detail = (
+                        f"effective min replicas={effective_replicas} (HPA minReplicas={hpa_min})"
+                    )
+                else:
+                    replica_detail = f"replicas={target.replicas}"
                 findings.append(
                     Finding(
                         rule_id="KG006",
@@ -560,7 +596,7 @@ def evaluate_documents(
                         resource=target.resource_id,
                         location=doc.location_for(("spec", "replicas")),
                         message=(
-                            f"{target.kind} with replicas={target.replicas} has no matching "
+                            f"{target.kind} with {replica_detail} has no matching "
                             "PodDisruptionBudget in scanned manifests."
                         ),
                         remediation=(
