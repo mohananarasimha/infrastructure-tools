@@ -8,7 +8,7 @@
 
 1. **`k8s-guard`** *(Complete)* — Static Kubernetes manifest reliability, security, and GPU-hygiene linter with file/line diagnostics and stdin (`helm template`) support.
 2. **`k8s-triage`** *(Complete)* — Kubernetes pod/event/probe/node-pressure failure correlator with offline `--fixture` replay and `kind` integration testing.
-3. **`infer-bench`** *(Planned)* — Async SSE streaming latency (TTFT, ITL), throughput, and timeout/error-rate analyzer for OpenAI-compatible/vLLM inference endpoints with SLO gates.
+3. **`infer-bench`** *(Complete)* — Async SSE streaming latency (TTFT, ITL), throughput, and timeout/error-rate analyzer for OpenAI-compatible/vLLM inference endpoints with open-loop load generation and SLO gates.
 4. **`pg-diag`** *(Planned)* — Read-only PostgreSQL blocking lock-tree, connection-pool saturation, and `idle in transaction` diagnostic tool.
 
 ## Shared CLI, Output, and Exit-Code Contract
