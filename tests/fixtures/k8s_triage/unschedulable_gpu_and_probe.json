@@ -1,0 +1,103 @@
+{
+  "source": "fixture:unschedulable-gpu-and-probe",
+  "namespace": null,
+  "pods": [
+    {
+      "name": "vllm-llama-0",
+      "namespace": "ml-serving",
+      "phase": "Pending",
+      "node_name": null,
+      "conditions": [
+        {
+          "type": "PodScheduled",
+          "status": "False",
+          "reason": "Unschedulable",
+          "message": "0/3 nodes are available: 2 Insufficient nvidia.com/gpu, 1 node(s) had untolerated taint {nvidia.com/gpu: present}."
+        }
+      ],
+      "containers": []
+    },
+    {
+      "name": "model-loader-4f1a9c-q7w2e",
+      "namespace": "staging",
+      "phase": "Pending",
+      "node_name": "worker-cpu-01",
+      "conditions": [
+        { "type": "PodScheduled", "status": "True" },
+        { "type": "Ready", "status": "False" }
+      ],
+      "containers": [
+        {
+          "name": "loader",
+          "image": "ghcr.io/example-org/model-loader:9.9.9",
+          "ready": false,
+          "restart_count": 0,
+          "state": "waiting",
+          "state_reason": "ImagePullBackOff",
+          "state_message": "Back-off pulling image \"ghcr.io/example-org/model-loader:9.9.9\""
+        }
+      ]
+    },
+    {
+      "name": "api-gateway-2b8c7d-r5t8y",
+      "namespace": "production",
+      "phase": "Running",
+      "node_name": "worker-cpu-01",
+      "conditions": [
+        { "type": "PodScheduled", "status": "True" },
+        { "type": "Ready", "status": "False", "reason": "ContainersNotReady" }
+      ],
+      "containers": [
+        {
+          "name": "gateway",
+          "image": "ghcr.io/example-org/api-gateway:3.0.1",
+          "ready": false,
+          "restart_count": 0,
+          "state": "running",
+          "memory_limit": "512Mi"
+        }
+      ]
+    }
+  ],
+  "events": [
+    {
+      "namespace": "ml-serving",
+      "involved_kind": "Pod",
+      "involved_name": "vllm-llama-0",
+      "event_type": "Warning",
+      "reason": "FailedScheduling",
+      "message": "0/3 nodes are available: 2 Insufficient nvidia.com/gpu, 1 node(s) had untolerated taint {nvidia.com/gpu: present}.",
+      "count": 4,
+      "last_timestamp": "2026-11-24T12:01:00Z"
+    },
+    {
+      "namespace": "staging",
+      "involved_kind": "Pod",
+      "involved_name": "model-loader-4f1a9c-q7w2e",
+      "event_type": "Warning",
+      "reason": "Failed",
+      "message": "Failed to pull image \"ghcr.io/example-org/model-loader:9.9.9\": rpc error: code = NotFound desc = manifest unknown",
+      "count": 3,
+      "last_timestamp": "2026-11-24T12:02:00Z"
+    },
+    {
+      "namespace": "production",
+      "involved_kind": "Pod",
+      "involved_name": "api-gateway-2b8c7d-r5t8y",
+      "event_type": "Warning",
+      "reason": "Unhealthy",
+      "message": "Readiness probe failed: HTTP probe failed with statuscode: 503",
+      "count": 5,
+      "last_timestamp": "2026-11-24T12:03:00Z"
+    }
+  ],
+  "nodes": [
+    {
+      "name": "worker-cpu-01",
+      "unschedulable": false,
+      "conditions": [
+        { "type": "Ready", "status": "True", "reason": "KubeletReady" }
+      ]
+    }
+  ]
+}

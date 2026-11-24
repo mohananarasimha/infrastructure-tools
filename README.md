@@ -8,11 +8,12 @@ A single Python package containing four focused, locally testable CLI utilities 
 flowchart LR
     CLI["Unified CLI (infra-tools) & Tool Entrypoints"] --> CORE["Shared Core (core/models.py, core/output.py)"]
     CLI --> KG["k8s-guard\nStatic K8s & GPU Linter"]
-    CLI --> KT["k8s-triage (Planned)\nPod/Event/Node Correlator"]
+    CLI --> KT["k8s-triage\nPod/Event/Node Correlator"]
     CLI --> IB["infer-bench (Planned)\nSSE/vLLM Latency & SLO Probe"]
     CLI --> PG["pg-diag (Planned)\nPostgres Lock & Pool Analyzer"]
 
     KG --> OUT["Deterministic Output\n--format table | json\nExit Codes: 0 / 1 / 2"]
+    KT --> OUT
     CORE --> OUT
 ```
 
@@ -21,7 +22,7 @@ flowchart LR
 | Tool | Domain | Status | Purpose |
 | --- | --- | --- | --- |
 | `k8s-guard` | Platform / SRE / ML Platform | **Complete** | Static reliability, security, and GPU-hygiene linter for YAML manifests and `helm template` output |
-| `k8s-triage` | SRE / Platform / AI Infra | Planned | Correlates unhealthy pods, events, probe failures, and node pressure with offline `--fixture` replay |
+| `k8s-triage` | SRE / Platform / AI Infra | **Complete** | Correlates unhealthy pods, events, probe failures, and node pressure with offline `--fixture` replay |
 | `infer-bench` | AI Infra / AI Reliability | Planned | Async SSE streaming benchmark measuring TTFT, ITL, tok/s, error rates, and SLO gates for OpenAI/vLLM APIs |
 | `pg-diag` | SRE / Data Infra | Planned | Read-only PostgreSQL analyzer for blocking lock chains, connection saturation, and idle-in-transaction leaks |
 
@@ -151,3 +152,122 @@ uv run pytest -v
 - Run `k8s-guard scan - --format json` after `helm template` or `kustomize build` so post-overlay labels, `replicas`, and PDB selectors are evaluated accurately.
 - Start with `--fail-on high` in brownfield repositories and tighten to `--fail-on medium` or `--fail-on low` once legacy workloads are remediated.
 - Pair static pre-merge guardrails (`k8s-guard`) with cluster admission control (e.g., Pod Security Admission / Kyverno) for defense in depth.
+
+---
+
+## Tool 2: `k8s-triage`
+
+### Problem
+
+During Kubernetes incidents, root-cause evidence is fragmented across pod statuses, container `lastState` termination codes, namespace `Events`, and `Node` pressure conditions. Running `kubectl get pods`, `describe pod`, `get events`, and `get nodes` manually across namespaces slows triage and makes it easy to miss silent restart loops or node-wide pressure affecting multiple workloads.
+
+### Use Case
+
+Run `k8s-triage` read-only against a live Kubernetes cluster (with bounded API timeouts) or offline against a captured `ClusterSnapshot` JSON fixture (`--fixture`) to produce severity-ranked root-cause findings and concrete remediation steps in table or JSON format. Both live collection and fixture replay feed the exact same pure analyzer.
+
+### Rules
+
+| Rule ID | Severity | Check |
+| --- | --- | --- |
+| `KT001` | `CRITICAL` | Container `OOMKilled` (`reason == OOMKilled` or exit code `137`) correlated with pod events and declared memory limits |
+| `KT002` | `HIGH` | `CrashLoopBackOff` with restart count, last termination reason/exit code, and correlated warning events |
+| `KT003` | `HIGH` | `ImagePullBackOff` / `ErrImagePull` with failing image reference and correlated pull error event |
+| `KT004` | `HIGH` | `CreateContainerConfigError` / `CreateContainerError` (missing ConfigMap/Secret or runtime constraint) |
+| `KT005` | `HIGH` | Unschedulable `Pending` pod (`PodScheduled=False` / `FailedScheduling`), distinguishing GPU/CPU/memory insufficiency vs taint/affinity mismatch |
+| `KT006` | `MEDIUM` | Failing readiness/liveness/startup probe (`Unhealthy` warning events) with event count and latest failure message |
+| `KT007` | `CRITICAL` / `HIGH` | Unhealthy `Node` (`Ready != True` -> `CRITICAL`; `MemoryPressure`/`DiskPressure`/`PIDPressure` -> `HIGH`), listing scheduled pods on the node |
+| `KT008` | `MEDIUM` | High container restart count (`>= 3`), including currently `Running` containers to catch silent instability |
+
+### Usage
+
+```bash
+# Inspect a live cluster namespace (read-only CoreV1Api, 10s request timeout)
+uv run k8s-triage inspect --namespace ml-serving
+
+# Inspect all namespaces using a specific kubeconfig context
+uv run k8s-triage inspect --all-namespaces --context kind-dev --format json
+
+# Analyze an offline ClusterSnapshot fixture (no cluster required)
+uv run k8s-triage inspect --fixture tests/fixtures/k8s_triage/unschedulable_gpu_and_probe.json --format json
+
+# Enforce CI/post-deploy gate on CRITICAL findings only
+uv run k8s-triage inspect --fixture tests/fixtures/k8s_triage/oom_and_crashloop.json --fail-on critical
+
+# List built-in diagnostic rules
+uv run k8s-triage rules
+
+# Unified dispatcher entrypoint
+uv run infra-tools k8s-triage inspect --fixture tests/fixtures/k8s_triage/healthy_cluster.json
+```
+
+### Example Output (`--format json`)
+
+```json
+{
+  "tool": "k8s-triage",
+  "target": "tests/fixtures/k8s_triage/unschedulable_gpu_and_probe.json",
+  "summary": {
+    "documents_scanned": 4,
+    "total_findings": 3,
+    "by_severity": {
+      "CRITICAL": 0,
+      "HIGH": 2,
+      "MEDIUM": 1,
+      "LOW": 0,
+      "INFO": 0
+    }
+  },
+  "findings": [
+    {
+      "rule_id": "KT003",
+      "severity": "HIGH",
+      "resource": "Pod/staging/model-loader-4f1a9c-q7w2e",
+      "location": "container/loader",
+      "message": "Container 'loader' failed to pull image 'ghcr.io/example-org/model-loader:9.9.9' (ImagePullBackOff). Detail: Failed to pull image \"ghcr.io/example-org/model-loader:9.9.9\": rpc error: code = NotFound desc = manifest unknown",
+      "remediation": "Verify image name and tag exist in the registry, confirm imagePullSecrets credentials, and check cluster egress to the registry."
+    },
+    {
+      "rule_id": "KT005",
+      "severity": "HIGH",
+      "resource": "Pod/ml-serving/vllm-llama-0",
+      "location": "pod/scheduling",
+      "message": "Pod is Pending/Unschedulable (insufficient GPU capacity; node taint/toleration mismatch). Evidence: 0/3 nodes are available: 2 Insufficient nvidia.com/gpu, 1 node(s) had untolerated taint {nvidia.com/gpu: present}.",
+      "remediation": "Align resource requests (CPU/memory/GPU), nodeSelector/affinity, and tolerations with available cluster nodes or scale the matching node pool."
+    },
+    {
+      "rule_id": "KT006",
+      "severity": "MEDIUM",
+      "resource": "Pod/production/api-gateway-2b8c7d-r5t8y",
+      "location": "pod/probes",
+      "message": "Pod has failing readiness probe (5 Unhealthy event(s)). Latest: Readiness probe failed: HTTP probe failed with statuscode: 503",
+      "remediation": "Verify probe path/port, increase initialDelaySeconds/timeoutSeconds if startup is slow, and inspect application logs for health-check errors."
+    }
+  ],
+  "passed": false
+}
+```
+
+### Error Handling
+
+- Unreachable clusters, expired credentials (`HTTP 401`), missing kubeconfig files, malformed fixture JSON, invalid `ClusterSnapshot` schemas, and conflicting flags (`--namespace` with `--all-namespaces`) emit a sanitized error message to `stderr` and exit with code `2` (never a raw traceback or leaked kubeconfig token).
+- If the caller lacks cluster-wide `nodes` list RBAC (`HTTP 403`) during namespace inspection, `k8s-triage` degrades gracefully by skipping node checks while still analyzing namespace pods and events.
+
+### Tests & Verification
+
+```bash
+uv run ruff check .
+uv run mypy src
+uv run pytest -v
+```
+
+### Known Limitations
+
+- Kubernetes `Events` have a default TTL (~1 hour); older probe failures or scheduling errors that have already been garbage-collected by the API server will not appear in live snapshots.
+- Does not fetch container stdout/stderr logs (`pods/log`) automatically to keep snapshots fast, bounded, and free of application payload data.
+- `KT007` correlates pods present in the collected namespace scope; when inspecting a single namespace, pods from other namespaces on a pressured node are not listed unless `--all-namespaces` is used.
+
+### Production Considerations
+
+- Run with a read-only `ServiceAccount` granted `get`/`list` on `pods`, `events`, and optionally `nodes` (no `secrets` or write verbs required).
+- Use `k8s-triage inspect --format json` in post-deploy smoke checks or incident runbooks to capture reproducible triage reports without mutating cluster state.
+

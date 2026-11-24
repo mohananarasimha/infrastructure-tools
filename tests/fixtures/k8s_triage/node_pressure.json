@@ -1,0 +1,99 @@
+{
+  "source": "fixture:node-pressure",
+  "namespace": null,
+  "pods": [
+    {
+      "name": "vllm-0",
+      "namespace": "ml-serving",
+      "phase": "Running",
+      "node_name": "worker-gpu-01",
+      "conditions": [
+        { "type": "Ready", "status": "True" }
+      ],
+      "containers": [
+        {
+          "name": "vllm",
+          "image": "vllm/vllm-openai:v0.6.4",
+          "ready": true,
+          "restart_count": 0,
+          "state": "running",
+          "gpu_limit": "1"
+        }
+      ]
+    },
+    {
+      "name": "batch-worker-1",
+      "namespace": "production",
+      "phase": "Running",
+      "node_name": "worker-gpu-01",
+      "conditions": [
+        { "type": "Ready", "status": "True" }
+      ],
+      "containers": [
+        {
+          "name": "worker",
+          "image": "ghcr.io/example-org/batch-worker:1.0.4",
+          "ready": true,
+          "restart_count": 0,
+          "state": "running"
+        }
+      ]
+    },
+    {
+      "name": "log-shipper-0",
+      "namespace": "observability",
+      "phase": "Running",
+      "node_name": "worker-cpu-02",
+      "conditions": [
+        { "type": "Ready", "status": "True" }
+      ],
+      "containers": [
+        {
+          "name": "shipper",
+          "image": "ghcr.io/example-org/log-shipper:2.1.0",
+          "ready": true,
+          "restart_count": 0,
+          "state": "running"
+        }
+      ]
+    }
+  ],
+  "events": [],
+  "nodes": [
+    {
+      "name": "worker-gpu-01",
+      "unschedulable": false,
+      "conditions": [
+        {
+          "type": "Ready",
+          "status": "False",
+          "reason": "KubeletNotReady",
+          "message": "PLEG is not healthy"
+        },
+        {
+          "type": "MemoryPressure",
+          "status": "True",
+          "reason": "KubeletHasInsufficientMemory",
+          "message": "kubelet has insufficient memory available"
+        },
+        {
+          "type": "DiskPressure",
+          "status": "False"
+        }
+      ]
+    },
+    {
+      "name": "worker-cpu-02",
+      "unschedulable": false,
+      "conditions": [
+        { "type": "Ready", "status": "True", "reason": "KubeletReady" },
+        {
+          "type": "DiskPressure",
+          "status": "True",
+          "reason": "KubeletHasDiskPressure",
+          "message": "kubelet has disk pressure"
+        }
+      ]
+    }
+  ]
+}

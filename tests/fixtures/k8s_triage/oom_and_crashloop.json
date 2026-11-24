@@ -1,0 +1,76 @@
+{
+  "source": "fixture:oom-and-crashloop",
+  "namespace": null,
+  "pods": [
+    {
+      "name": "embedding-worker-7c9d4f8b2-x9k2p",
+      "namespace": "ml-serving",
+      "phase": "Running",
+      "node_name": "worker-cpu-01",
+      "conditions": [
+        { "type": "PodScheduled", "status": "True" },
+        { "type": "Ready", "status": "False", "reason": "ContainersNotReady" }
+      ],
+      "containers": [
+        {
+          "name": "worker",
+          "image": "ghcr.io/example-org/embedding-worker:2.3.1",
+          "ready": false,
+          "restart_count": 6,
+          "state": "waiting",
+          "state_reason": "CrashLoopBackOff",
+          "state_message": "back-off 5m0s restarting failed container=worker",
+          "last_state_reason": "OOMKilled",
+          "last_exit_code": 137,
+          "memory_limit": "512Mi",
+          "cpu_limit": "1"
+        }
+      ]
+    },
+    {
+      "name": "cache-proxy-9b4a2f1d-m3q1z",
+      "namespace": "production",
+      "phase": "Running",
+      "node_name": "worker-cpu-01",
+      "conditions": [
+        { "type": "PodScheduled", "status": "True" },
+        { "type": "Ready", "status": "True" }
+      ],
+      "containers": [
+        {
+          "name": "proxy",
+          "image": "ghcr.io/example-org/cache-proxy:1.1.0",
+          "ready": true,
+          "restart_count": 4,
+          "state": "running",
+          "last_state_reason": "Error",
+          "last_exit_code": 1,
+          "memory_limit": "256Mi",
+          "cpu_limit": "250m"
+        }
+      ]
+    }
+  ],
+  "events": [
+    {
+      "namespace": "ml-serving",
+      "involved_kind": "Pod",
+      "involved_name": "embedding-worker-7c9d4f8b2-x9k2p",
+      "event_type": "Warning",
+      "reason": "BackOff",
+      "message": "Back-off restarting failed container worker in pod embedding-worker-7c9d4f8b2-x9k2p",
+      "count": 12,
+      "last_timestamp": "2026-11-24T11:15:00Z"
+    }
+  ],
+  "nodes": [
+    {
+      "name": "worker-cpu-01",
+      "unschedulable": false,
+      "conditions": [
+        { "type": "Ready", "status": "True", "reason": "KubeletReady" },
+        { "type": "MemoryPressure", "status": "False" }
+      ]
+    }
+  ]
+}
