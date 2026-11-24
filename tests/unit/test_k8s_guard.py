@@ -311,6 +311,7 @@ spec:
         limits: { cpu: "200m", memory: "256Mi" }
       securityContext:
         allowPrivilegeEscalation: false
+        readOnlyRootFilesystem: true
         capabilities: { drop: ["ALL"] }
 """
     docs = parse_yaml_stream(manifest, source="pod.yaml")
@@ -318,6 +319,185 @@ spec:
     assert len(findings) == 1
     assert findings[0].rule_id == "KG001"
     assert "init-unpinned" in findings[0].message
+
+
+def test_kg008_applies_to_all_non_init_workloads_regardless_of_replicas() -> None:
+    manifest = """
+apiVersion: v1
+kind: Pod
+metadata:
+  name: standalone-pod
+spec:
+  securityContext:
+    runAsNonRoot: true
+  initContainers:
+    - name: bootstrap
+      image: ghcr.io/example/init:1.0.0
+      resources:
+        requests: { cpu: "50m", memory: "64Mi" }
+        limits: { cpu: "100m", memory: "128Mi" }
+      securityContext:
+        allowPrivilegeEscalation: false
+        capabilities: { drop: ["ALL"] }
+  containers:
+    - name: worker
+      image: ghcr.io/example/worker:1.0.0
+      resources:
+        requests: { cpu: "100m", memory: "128Mi" }
+        limits: { cpu: "200m", memory: "256Mi" }
+      securityContext:
+        allowPrivilegeEscalation: false
+        capabilities: { drop: ["ALL"] }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: single-replica-api
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: api
+  template:
+    metadata:
+      labels:
+        app: api
+    spec:
+      securityContext:
+        runAsNonRoot: true
+      containers:
+        - name: api
+          image: ghcr.io/example/api:1.0.0
+          resources:
+            requests: { cpu: "100m", memory: "128Mi" }
+            limits: { cpu: "200m", memory: "256Mi" }
+          readinessProbe: { tcpSocket: { port: 8080 } }
+          livenessProbe: { tcpSocket: { port: 8080 } }
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities: { drop: ["ALL"] }
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: cache
+spec:
+  replicas: 1
+  serviceName: cache
+  selector:
+    matchLabels:
+      app: cache
+  template:
+    metadata:
+      labels:
+        app: cache
+    spec:
+      securityContext:
+        runAsNonRoot: true
+      containers:
+        - name: cache
+          image: ghcr.io/example/cache:1.0.0
+          resources:
+            requests: { cpu: "100m", memory: "128Mi" }
+            limits: { cpu: "200m", memory: "256Mi" }
+          readinessProbe: { tcpSocket: { port: 6379 } }
+          livenessProbe: { tcpSocket: { port: 6379 } }
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities: { drop: ["ALL"] }
+"""
+    docs = parse_yaml_stream(manifest, source="workloads.yaml")
+    findings = evaluate_documents(docs)
+    assert len(findings) == 3
+    assert all(f.rule_id == "KG008" and f.severity == Severity.LOW for f in findings)
+    assert {f.resource for f in findings} == {
+        "Pod/standalone-pod",
+        "Deployment/single-replica-api",
+        "StatefulSet/cache",
+    }
+    # initContainer 'bootstrap' must NOT trigger KG008.
+    assert all("bootstrap" not in f.message for f in findings)
+
+
+def test_kg006_hpa_min_replicas_triggers_and_resolves_with_pdb() -> None:
+    deployment_without_replicas = """
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: inference-gateway
+  namespace: serving
+spec:
+  selector:
+    matchLabels:
+      app: inference-gateway
+  template:
+    metadata:
+      labels:
+        app: inference-gateway
+    spec:
+      securityContext:
+        runAsNonRoot: true
+      containers:
+        - name: gateway
+          image: ghcr.io/example/gateway:1.2.0
+          resources:
+            requests: { cpu: "200m", memory: "256Mi" }
+            limits: { cpu: "500m", memory: "512Mi" }
+          readinessProbe: { httpGet: { path: /readyz, port: 8080 } }
+          livenessProbe: { httpGet: { path: /healthz, port: 8080 } }
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: { drop: ["ALL"] }
+"""
+    hpa_v2 = """
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: inference-gateway-hpa
+  namespace: serving
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: inference-gateway
+  minReplicas: 2
+  maxReplicas: 10
+"""
+    matching_pdb = """
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: inference-gateway-pdb
+  namespace: serving
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app: inference-gateway
+"""
+    hpa_wrong_ns = hpa_v2.replace("namespace: serving", "namespace: other")
+
+    # HPA minReplicas=2 with omitted spec.replicas and no PDB -> KG006 fires.
+    docs_no_pdb = parse_yaml_stream(deployment_without_replicas + hpa_v2, source="hpa.yaml")
+    findings_no_pdb = evaluate_documents(docs_no_pdb)
+    assert len(findings_no_pdb) == 1
+    assert findings_no_pdb[0].rule_id == "KG006"
+    assert "HPA minReplicas=2" in findings_no_pdb[0].message
+
+    # Same Deployment + HPA + matching PDB -> passes cleanly.
+    docs_with_pdb = parse_yaml_stream(
+        deployment_without_replicas + hpa_v2 + matching_pdb, source="hpa-pdb.yaml"
+    )
+    assert evaluate_documents(docs_with_pdb) == []
+
+    # HPA in another namespace does not affect Deployment in 'serving'.
+    docs_wrong_ns = parse_yaml_stream(
+        deployment_without_replicas + hpa_wrong_ns, source="hpa-wrong-ns.yaml"
+    )
+    assert evaluate_documents(docs_wrong_ns) == []
 
 
 def test_table_output_rules_subcommand_and_root_dispatcher() -> None:

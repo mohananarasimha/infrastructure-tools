@@ -43,7 +43,8 @@ RULE_CATALOG: tuple[RuleSpec, ...] = (
         title="Container OOMKilled",
         description=(
             "Flags containers terminated with OOMKilled or exit code 137, correlated with "
-            "pod events and declared memory limits."
+            "pod events, memory limits, and CrashLoopBackOff/restart state (supersedes "
+            "KT002 and KT008 for the same container)."
         ),
     ),
     RuleSpec(
@@ -51,8 +52,9 @@ RULE_CATALOG: tuple[RuleSpec, ...] = (
         severity=Severity.HIGH,
         title="Container CrashLoopBackOff",
         description=(
-            "Flags containers in CrashLoopBackOff with restart count, last termination "
-            "reason/exit code, and correlated warning events."
+            "Flags non-OOM containers in CrashLoopBackOff with restart count, last termination "
+            "reason/exit code, and correlated warning events (supersedes KT008 for the same "
+            "container)."
         ),
     ),
     RuleSpec(
@@ -105,8 +107,8 @@ RULE_CATALOG: tuple[RuleSpec, ...] = (
         severity=Severity.MEDIUM,
         title="High container restart count",
         description=(
-            "Flags containers with restartCount >= 3 (including currently Running containers) "
-            "to surface silent crash instability."
+            "Flags containers with restartCount >= 3 not already covered by KT001/KT002 "
+            "(such as currently Running containers) to surface silent crash instability."
         ),
     ),
 )
@@ -186,19 +188,29 @@ def _analyze_pod(
     for container in pod.containers:
         loc = _container_location(container)
 
-        # KT001: Container OOMKilled
         is_oom = (
             container.state_reason == "OOMKilled"
             or container.last_state_reason == "OOMKilled"
             or container.exit_code == 137
             or container.last_exit_code == 137
         )
+        is_crashloop = container.state_reason == "CrashLoopBackOff"
+        is_high_restarts = container.restart_count >= HIGH_RESTART_THRESHOLD
+
+        # Correlation dedup per (pod, container):
+        #   KT001 (OOMKilled) supersedes KT002 (CrashLoopBackOff) and KT008 (high restarts).
+        #   KT002 (CrashLoopBackOff) supersedes KT008 (high restarts).
         if is_oom:
             mem_info = (
                 f"memory limit={container.memory_limit}"
                 if container.memory_limit
                 else "memory limit unset"
             )
+            details: list[str] = []
+            if is_crashloop:
+                details.append("also in CrashLoopBackOff")
+            details.append(f"restarts={container.restart_count}")
+            details.append(mem_info)
             ev = _latest_matching_event(
                 pod_events,
                 keywords=("oom", "killed", "memory", "back-off"),
@@ -213,7 +225,7 @@ def _analyze_pod(
                     location=loc,
                     message=(
                         f"Container '{container.name}' was OOMKilled "
-                        f"(restarts={container.restart_count}, {mem_info}).{ev_note}"
+                        f"({', '.join(details)}).{ev_note}"
                     ),
                     remediation=(
                         "Profile container memory usage for leaks, raise resources.limits.memory, "
@@ -221,9 +233,7 @@ def _analyze_pod(
                     ),
                 )
             )
-
-        # KT002: CrashLoopBackOff
-        if container.state_reason == "CrashLoopBackOff":
+        elif is_crashloop:
             last_detail_parts: list[str] = []
             if container.last_state_reason:
                 last_detail_parts.append(f"last_reason={container.last_state_reason}")
@@ -245,6 +255,33 @@ def _analyze_pod(
                     remediation=(
                         "Inspect previous logs (`kubectl logs <pod> -c <container> --previous`) "
                         "to resolve the recurring startup or runtime crash."
+                    ),
+                )
+            )
+        elif is_high_restarts:
+            state_desc = (
+                f"{container.state} ({container.state_reason})"
+                if container.state_reason
+                else container.state
+            )
+            last_note = (
+                f", last_reason={container.last_state_reason}"
+                if container.last_state_reason
+                else ""
+            )
+            findings.append(
+                Finding(
+                    rule_id="KT008",
+                    severity=Severity.MEDIUM,
+                    resource=resource,
+                    location=loc,
+                    message=(
+                        f"Container '{container.name}' has {container.restart_count} restarts "
+                        f"(current state={state_desc}{last_note})."
+                    ),
+                    remediation=(
+                        "Investigate recurring container restarts even if currently Running to "
+                        "eliminate silent crash loops or liveness-probe flaps."
                     ),
                 )
             )
@@ -297,35 +334,6 @@ def _analyze_pod(
                     remediation=(
                         "Verify referenced ConfigMaps, Secrets, ServiceAccounts, and "
                         "securityContext/runtime constraints in the target namespace."
-                    ),
-                )
-            )
-
-        # KT008: High restart count (>= 3)
-        if container.restart_count >= HIGH_RESTART_THRESHOLD:
-            state_desc = (
-                f"{container.state} ({container.state_reason})"
-                if container.state_reason
-                else container.state
-            )
-            last_note = (
-                f", last_reason={container.last_state_reason}"
-                if container.last_state_reason
-                else ""
-            )
-            findings.append(
-                Finding(
-                    rule_id="KT008",
-                    severity=Severity.MEDIUM,
-                    resource=resource,
-                    location=loc,
-                    message=(
-                        f"Container '{container.name}' has {container.restart_count} restarts "
-                        f"(current state={state_desc}{last_note})."
-                    ),
-                    remediation=(
-                        "Investigate recurring container restarts even if currently Running to "
-                        "eliminate silent crash loops or liveness-probe flaps."
                     ),
                 )
             )

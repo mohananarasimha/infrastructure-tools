@@ -16,7 +16,7 @@ This repository implements four standalone Python CLI utilities inside one `uv`-
 - **Package manager**: `uv` with `hatchling` build backend (`pyproject.toml`, Python 3.11+).
 - **Shared core** (`src/infra_tools/core/`):
   - `models.py`: `Severity`, `ExitCode`, `OutputFormat`, `Finding`, `ReportSummary`, `ToolReport`.
-  - `output.py`: Deterministic JSON serialization and Rich table formatting.
+  - `output.py`: Deterministic JSON serialization and non-truncating Rich text block formatting.
 - **Exit-code contract**:
   - `0`: Healthy / checks passed.
   - `1`: Policy findings or SLO threshold breaches.

@@ -42,30 +42,99 @@ def test_healthy_cluster_fixture_passes() -> None:
     assert report.findings == []
 
 
-def test_oom_and_crashloop_fixture_triggers_kt001_kt002_kt008() -> None:
+def test_oom_and_crashloop_fixture_deduplicates_per_container() -> None:
     fixture = FIXTURES_DIR / "oom_and_crashloop.json"
     result = runner.invoke(triage_app, ["inspect", "--fixture", str(fixture), "--format", "json"])
     assert result.exit_code == ExitCode.FINDINGS
 
     report = ToolReport.model_validate_json(result.stdout)
     assert report.passed is False
-    found_ids = {f.rule_id for f in report.findings}
-    assert found_ids == {"KT001", "KT002", "KT008"}
+    # embedding-worker (OOMKilled + CrashLoopBackOff + 6 restarts) emits ONLY KT001;
+    # cache-proxy (Running + 4 restarts) emits KT008.
+    assert [f.rule_id for f in report.findings] == ["KT001", "KT008"]
 
-    kt001 = next(f for f in report.findings if f.rule_id == "KT001")
+    kt001 = report.findings[0]
     assert kt001.severity == Severity.CRITICAL
+    assert "also in CrashLoopBackOff" in kt001.message
+    assert "restarts=6" in kt001.message
     assert "512Mi" in kt001.message
     assert "Back-off" in kt001.message
 
-    kt002 = next(f for f in report.findings if f.rule_id == "KT002")
-    assert kt002.severity == Severity.HIGH
-    assert "last_reason=OOMKilled" in kt002.message
-    assert "last_exit_code=137" in kt002.message
+    kt008 = report.findings[1]
+    assert kt008.severity == Severity.MEDIUM
+    assert "cache-proxy" in kt008.resource
+    assert "state=running" in kt008.message
+    assert "4 restarts" in kt008.message
 
-    # KT008 fires for both CrashLoopBackOff container (6 restarts) and Running proxy (4 restarts).
-    kt008_list = [f for f in report.findings if f.rule_id == "KT008"]
-    assert len(kt008_list) == 2
-    assert any("cache-proxy" in f.resource and "state=running" in f.message for f in kt008_list)
+
+def test_correlation_dedup_per_pod_container_across_oom_crashloop_and_restarts() -> None:
+    snapshot = ClusterSnapshot(
+        source="unit-dedup",
+        pods=[
+            PodSnapshot(
+                name="multi-container-pod",
+                namespace="prod",
+                phase="Running",
+                containers=[
+                    ContainerStateSnapshot(
+                        name="oom-loop",
+                        image="ghcr.io/example/worker:1.0.0",
+                        restart_count=7,
+                        state="waiting",
+                        state_reason="CrashLoopBackOff",
+                        last_state_reason="OOMKilled",
+                        last_exit_code=137,
+                        memory_limit="1Gi",
+                    ),
+                    ContainerStateSnapshot(
+                        name="app-crash",
+                        image="ghcr.io/example/api:1.0.0",
+                        restart_count=5,
+                        state="waiting",
+                        state_reason="CrashLoopBackOff",
+                        last_state_reason="Error",
+                        last_exit_code=1,
+                    ),
+                    ContainerStateSnapshot(
+                        name="flaky-sidecar",
+                        image="ghcr.io/example/sidecar:1.0.0",
+                        ready=True,
+                        restart_count=4,
+                        state="running",
+                        last_state_reason="Error",
+                        last_exit_code=2,
+                    ),
+                ],
+            )
+        ],
+    )
+
+    findings = analyze_snapshot(snapshot)
+    by_loc = {f.location: f for f in findings}
+    assert len(findings) == 3
+    assert set(by_loc) == {
+        "container/oom-loop",
+        "container/app-crash",
+        "container/flaky-sidecar",
+    }
+
+    # Container 1: KT001 suppresses KT002 and KT008, retaining CrashLoopBackOff & restarts=7.
+    oom = by_loc["container/oom-loop"]
+    assert oom.rule_id == "KT001"
+    assert "also in CrashLoopBackOff" in oom.message
+    assert "restarts=7" in oom.message
+
+    # Container 2: KT002 suppresses KT008, retaining restarts=5, last_reason, last_exit_code.
+    crash = by_loc["container/app-crash"]
+    assert crash.rule_id == "KT002"
+    assert "restarts=5" in crash.message
+    assert "last_reason=Error" in crash.message
+    assert "last_exit_code=1" in crash.message
+
+    # Container 3: Running with high restarts still fires KT008.
+    flaky = by_loc["container/flaky-sidecar"]
+    assert flaky.rule_id == "KT008"
+    assert "4 restarts" in flaky.message
 
 
 def test_unschedulable_gpu_imagepull_and_probe_fixture() -> None:
@@ -300,7 +369,8 @@ def test_live_collector_error_handling_and_translation() -> None:
     assert snapshot.source == "live:kind-dev"
     assert snapshot.nodes == []
     findings = analyze_snapshot(snapshot)
-    assert {f.rule_id for f in findings} == {"KT001", "KT002"}
+    assert [f.rule_id for f in findings] == ["KT001"]
+    assert "also in CrashLoopBackOff" in findings[0].message
 
 
 def test_rules_subcommand_table_output_and_root_dispatcher() -> None:
