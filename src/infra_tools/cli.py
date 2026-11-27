@@ -8,6 +8,7 @@ from infra_tools import __version__
 from infra_tools.infer_bench.cli import app as infer_bench_app
 from infra_tools.k8s_guard.cli import app as k8s_guard_app
 from infra_tools.k8s_triage.cli import app as k8s_triage_app
+from infra_tools.pg_diag.cli import app as pg_diag_app
 
 app = typer.Typer(
     name="infra-tools",
@@ -17,6 +18,7 @@ app = typer.Typer(
 app.add_typer(k8s_guard_app, name="k8s-guard")
 app.add_typer(k8s_triage_app, name="k8s-triage")
 app.add_typer(infer_bench_app, name="infer-bench")
+app.add_typer(pg_diag_app, name="pg-diag")
 
 
 @app.command()

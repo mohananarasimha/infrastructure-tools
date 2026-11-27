@@ -5,7 +5,7 @@
 Utilities in `infrastructure-tools` follow strict read-only and static-analysis defaults:
 
 - **`k8s-guard`**: Pure static analysis of local YAML files or stdin. Makes zero network calls and parses YAML exclusively with `yaml.SafeLoader` (never `yaml.load` or unsafe constructors).
-- **Planned live-inspection tools (`k8s-triage`, `pg-diag`, `infer-bench`)**: Read-only cluster/database queries and explicit operator-targeted HTTP requests only; never mutate Kubernetes resources, database state, or cluster configuration.
+- **Live-inspection tools (`k8s-triage`, `pg-diag`, `infer-bench`)**: Read-only cluster/database queries and explicit operator-targeted HTTP requests only; never mutate Kubernetes resources, database state, or cluster configuration.
 
 ## Credential and Secret Handling Rules
 

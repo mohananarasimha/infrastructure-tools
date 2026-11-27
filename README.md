@@ -10,11 +10,12 @@ flowchart LR
     CLI --> KG["k8s-guard\nStatic K8s & GPU Linter"]
     CLI --> KT["k8s-triage\nPod/Event/Node Correlator"]
     CLI --> IB["infer-bench\nSSE/vLLM Latency & SLO Probe"]
-    CLI --> PG["pg-diag (Planned)\nPostgres Lock & Pool Analyzer"]
+    CLI --> PG["pg-diag\nPostgres Lock & Pool Analyzer"]
 
     KG --> OUT["Deterministic Output\n--format table | json\nExit Codes: 0 / 1 / 2"]
     KT --> OUT
     IB --> OUT
+    PG --> OUT
     CORE --> OUT
 ```
 
@@ -25,7 +26,7 @@ flowchart LR
 | `k8s-guard` | Platform / SRE / ML Platform | **Complete** | Static reliability, security, and GPU-hygiene linter for YAML manifests and `helm template` output |
 | `k8s-triage` | SRE / Platform / AI Infra | **Complete** | Correlates unhealthy pods, events, probe failures, and node pressure with offline `--fixture` replay |
 | `infer-bench` | AI Infra / AI Reliability | **Complete** | Async SSE streaming benchmark measuring TTFT, ITL, tok/s, error rates, and SLO gates for OpenAI/vLLM APIs |
-| `pg-diag` | SRE / Data Infra | Planned | Read-only PostgreSQL analyzer for blocking lock chains, connection saturation, and idle-in-transaction leaks |
+| `pg-diag` | SRE / Data Infra | **Complete** | Read-only PostgreSQL analyzer for blocking lock chains, connection saturation, and idle-in-transaction leaks |
 
 ---
 
@@ -373,6 +374,19 @@ uv run infer-bench run --url http://127.0.0.1:18081 --model llama-3.1-8b \
 
 # List built-in SLO rules (IB001-IB007)
 uv run infer-bench rules
+```
+
+---
+
+## Tool 4: `pg-diag`
+
+Read-only PostgreSQL diagnosis of blocking lock chains (PG001), idle-in-transaction sessions (PG002), connection saturation against usable `max_connections` slots (PG003), and slots held by idle pooled connections (PG004). Integration-tested against PostgreSQL 18 with each condition created for real. See [`src/infra_tools/pg_diag/README.md`](src/infra_tools/pg_diag/README.md) for rule thresholds, required privileges, real output, and limitations.
+
+```bash
+export PG_DIAG_DSN="host=127.0.0.1 port=5432 dbname=app user=diag"   # password via PGPASSWORD or ~/.pgpass
+uv run pg-diag inspect                      # exit 0 clean, 1 findings, 2 error
+uv run pg-diag snapshot > incident.json     # capture now, analyze later with --fixture
+uv run pg-diag rules
 ```
 
 
