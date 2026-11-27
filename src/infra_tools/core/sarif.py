@@ -105,9 +105,18 @@ def _result(
     if file_line is None:
         result["locations"] = [{"logicalLocations": logical}]
         return result, False
-    location = _physical(*file_line)
+    uri, line = file_line
+    location = _physical(uri, line)
     location["logicalLocations"] = logical
     result["locations"] = [location]
+    # Without this, upload-sarif hashes the flagged line plus the lines after it, so editing
+    # a neighbouring line (e.g. the image under `- name: web`) closes and reopens an
+    # unrelated alert. Rule, file, resource and message survive line shifts and nearby edits.
+    result["partialFingerprints"] = {
+        "primaryLocationLineHash": (
+            f"{_fingerprint(finding.rule_id, uri, finding.resource, finding.message)}:1"
+        )
+    }
     return result, True
 
 

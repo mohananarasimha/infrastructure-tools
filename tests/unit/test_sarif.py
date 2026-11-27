@@ -54,7 +54,30 @@ def test_k8s_guard_sarif_maps_findings_to_file_lines_and_rule_indexes() -> None:
         assert physical["artifactLocation"]["uri"] == path
         assert physical["region"]["startLine"] == int(line)
         assert finding.remediation in res["message"]["text"]
-        assert "partialFingerprints" not in res
+    hashes = [r["partialFingerprints"]["primaryLocationLineHash"] for r in results]
+    assert len(set(hashes)) == len(hashes)
+
+
+def test_k8s_guard_fingerprint_survives_line_shift_and_neighbour_edit(tmp_path: Path) -> None:
+    original = (FIXTURES / "broken_workload.yaml").read_text(encoding="utf-8")
+    manifest = tmp_path / "deploy.yaml"
+
+    def fingerprints(text: str) -> dict[tuple[str, str], tuple[str, int]]:
+        manifest.write_text(text, encoding="utf-8")
+        result = runner.invoke(guard_app, ["scan", str(manifest), "--format", "sarif"])
+        return {
+            (r["ruleId"], r["message"]["text"]): (
+                r["partialFingerprints"]["primaryLocationLineHash"],
+                r["locations"][0]["physicalLocation"]["region"]["startLine"],
+            )
+            for r in _run(json.loads(result.stdout))["results"]
+        }
+
+    before = fingerprints(original)
+    after = fingerprints("# added line\n# another\n" + original)
+    assert before.keys() == after.keys()
+    for key, (fp, line) in before.items():
+        assert after[key] == (fp, line + 2)
 
 
 def test_severity_to_level_mapping() -> None:
