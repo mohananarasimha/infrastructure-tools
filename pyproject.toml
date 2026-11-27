@@ -13,6 +13,7 @@ authors = [{ name = "Mohana Narasimha" }]
 dependencies = [
   "httpx>=0.27",
   "kubernetes>=31.0",
+  "psycopg[binary]>=3.2",
   "pydantic>=2.7",
   "pyyaml>=6.0",
   "rich>=13.7",
@@ -32,6 +33,7 @@ dev = [
 k8s-guard = "infra_tools.k8s_guard.cli:app"
 k8s-triage = "infra_tools.k8s_triage.cli:app"
 infer-bench = "infra_tools.infer_bench.cli:app"
+pg-diag = "infra_tools.pg_diag.cli:app"
 infra-tools = "infra_tools.cli:app"
 
 [tool.hatch.build.targets.wheel]

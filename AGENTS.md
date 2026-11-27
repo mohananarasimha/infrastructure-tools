@@ -9,7 +9,7 @@ This repository implements four standalone Python CLI utilities inside one `uv`-
 - `k8s-guard` (Complete): Static K8s manifest reliability, security, and GPU-hygiene linter.
 - `k8s-triage` (Complete): K8s pod, event, probe, and node-condition root-cause correlator.
 - `infer-bench` (Complete): Async streaming TTFT/ITL/throughput and reliability analyzer for OpenAI-compatible/vLLM endpoints.
-- `pg-diag` (Planned): Read-only PostgreSQL lock-tree, pool-saturation, and idle-in-transaction diagnostics.
+- `pg-diag`: Read-only PostgreSQL lock-tree, pool-saturation, and idle-in-transaction diagnostics.
 
 ## Architecture & Conventions
 
