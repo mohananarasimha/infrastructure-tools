@@ -1,0 +1,58 @@
+name: Code scanning (SARIF)
+
+# Example of publishing k8s-guard and pg-diag findings to GitHub code scanning.
+# Scans the synthetic inputs under examples/code-scanning/; point the paths at real
+# manifests or snapshots to reuse it.
+
+on:
+  push:
+    branches: ["main"]
+  pull_request:
+    branches: ["main"]
+
+permissions:
+  contents: read
+
+jobs:
+  sarif:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+
+      - name: Sync dependencies
+        run: uv sync --locked --python 3.12
+
+      # Exit 1 means findings, which code scanning reports. Exit 2 (bad input) fails the job.
+      - name: k8s-guard to SARIF
+        run: |
+          mkdir -p sarif
+          rc=0
+          uv run k8s-guard scan examples/code-scanning/manifests --format sarif \
+            > sarif/k8s-guard.sarif || rc=$?
+          [ "$rc" -le 1 ] || exit "$rc"
+
+      - name: pg-diag to SARIF
+        run: |
+          rc=0
+          uv run pg-diag inspect --fixture examples/code-scanning/pg-incident.json \
+            --format sarif > sarif/pg-diag.sarif || rc=$?
+          [ "$rc" -le 1 ] || exit "$rc"
+
+      - name: Upload k8s-guard results
+        uses: github/codeql-action/upload-sarif@v4
+        with:
+          sarif_file: sarif/k8s-guard.sarif
+
+      - name: Upload pg-diag results
+        uses: github/codeql-action/upload-sarif@v4
+        with:
+          sarif_file: sarif/pg-diag.sarif

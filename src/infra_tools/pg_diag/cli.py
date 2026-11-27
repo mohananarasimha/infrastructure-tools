@@ -12,8 +12,9 @@ import typer
 from rich.console import Console
 from rich.table import Table
 
-from infra_tools.core.models import ExitCode, OutputFormat, Severity
+from infra_tools.core.models import ExitCode, OutputFormat, ReportFormat, Severity
 from infra_tools.core.output import render_error, render_report
+from infra_tools.core.sarif import build_sarif
 from infra_tools.pg_diag.analyzer import RULE_CATALOG, Thresholds, diagnose
 from infra_tools.pg_diag.collector import (
     PgCollectionError,
@@ -68,9 +69,11 @@ def inspect(
         typer.Option("--fixture", help="Analyze a saved snapshot JSON instead of a live server."),
     ] = None,
     fmt: Annotated[
-        OutputFormat,
-        typer.Option("--format", "-f", case_sensitive=False, help="Output format: table or json."),
-    ] = OutputFormat.TABLE,
+        ReportFormat,
+        typer.Option(
+            "--format", "-f", case_sensitive=False, help="Output format: table, json, or sarif."
+        ),
+    ] = ReportFormat.TABLE,
     fail_on: Annotated[
         FailOnLevel,
         typer.Option(
@@ -79,6 +82,16 @@ def inspect(
             help="Minimum severity that causes exit code 1.",
         ),
     ] = FailOnLevel.LOW,
+    sarif_artifact: Annotated[
+        str | None,
+        typer.Option(
+            "--sarif-artifact",
+            help=(
+                "Repository-relative file that SARIF results are attached to (line 1). "
+                "Defaults to the --fixture path; live results need it to show in GitHub."
+            ),
+        ),
+    ] = None,
     idle_in_txn_seconds: Annotated[
         float,
         typer.Option("--idle-in-txn-seconds", min=0, help="PG002 threshold."),
@@ -116,7 +129,22 @@ def inspect(
     report = diagnose(
         snapshot, target=target, thresholds=thresholds, fail_on=fail_on.to_severity()
     )
-    render_report(report, fmt)
+    if fmt is ReportFormat.SARIF:
+        anchor = sarif_artifact if sarif_artifact is not None else fixture
+        sarif = build_sarif(
+            report,
+            RULE_CATALOG,
+            artifact_uri=None if anchor is None else Path(anchor).as_posix(),
+            file_locations=False,
+        )
+        sys.stdout.write(sarif.to_json())
+        if sarif.unlocated:
+            render_error(
+                f"{sarif.unlocated} SARIF result(s) have no file location; GitHub code scanning "
+                "will not display them. Pass --sarif-artifact <repo file>."
+            )
+    else:
+        render_report(report, fmt.as_output_format())
     raise typer.Exit(code=int(ExitCode.OK if report.passed else ExitCode.FINDINGS))
 
 
