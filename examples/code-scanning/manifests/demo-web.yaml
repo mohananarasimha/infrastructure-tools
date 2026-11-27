@@ -1,3 +1,4 @@
+# lifecycle check: temporary
 # Synthetic, intentionally flawed manifest. The code-scanning workflow scans it so the
 # resulting alerts can be inspected in the repository's Security tab. Do not deploy.
 apiVersion: apps/v1
@@ -17,7 +18,7 @@ spec:
     spec:
       containers:
         - name: web
-          image: nginx:latest
+          image: nginx:1.27.3
           ports:
             - containerPort: 8080
           resources:
