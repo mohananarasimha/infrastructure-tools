@@ -11,8 +11,9 @@ import typer
 from rich.console import Console
 from rich.table import Table
 
-from infra_tools.core.models import ExitCode, OutputFormat, Severity
+from infra_tools.core.models import ExitCode, OutputFormat, ReportFormat, Severity
 from infra_tools.core.output import render_error, render_report
+from infra_tools.core.sarif import build_sarif
 from infra_tools.k8s_guard.loader import ManifestLoadError
 from infra_tools.k8s_guard.rules import RULE_CATALOG, VALID_RULE_IDS
 from infra_tools.k8s_guard.scanner import scan_target
@@ -60,9 +61,11 @@ def scan(
         typer.Argument(help="Path to a YAML file, directory of manifests, or '-' for stdin."),
     ],
     fmt: Annotated[
-        OutputFormat,
-        typer.Option("--format", "-f", case_sensitive=False, help="Output format: table or json."),
-    ] = OutputFormat.TABLE,
+        ReportFormat,
+        typer.Option(
+            "--format", "-f", case_sensitive=False, help="Output format: table, json, or sarif."
+        ),
+    ] = ReportFormat.TABLE,
     fail_on: Annotated[
         FailOnLevel,
         typer.Option(
@@ -99,7 +102,16 @@ def scan(
         render_error(str(exc))
         raise typer.Exit(code=int(ExitCode.ERROR)) from None
 
-    render_report(report, fmt)
+    if fmt is ReportFormat.SARIF:
+        sarif = build_sarif(report, RULE_CATALOG)
+        sys.stdout.write(sarif.to_json())
+        if sarif.unlocated:
+            render_error(
+                f"{sarif.unlocated} SARIF result(s) have no file location (stdin input); "
+                "GitHub code scanning will not display them. Scan files instead of '-'."
+            )
+    else:
+        render_report(report, fmt.as_output_format())
     exit_code = ExitCode.OK if report.passed else ExitCode.FINDINGS
     raise typer.Exit(code=int(exit_code))
 

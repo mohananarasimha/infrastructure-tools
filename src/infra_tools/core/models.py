@@ -58,6 +58,19 @@ class OutputFormat(StrEnum):
     JSON = "json"
 
 
+class ReportFormat(StrEnum):
+    """Output formats for rule-based scans whose findings map to SARIF results."""
+
+    TABLE = "table"
+    JSON = "json"
+    SARIF = "sarif"
+
+    def as_output_format(self) -> OutputFormat:
+        if self is ReportFormat.SARIF:
+            raise ValueError("SARIF has no OutputFormat equivalent")
+        return OutputFormat(self.value)
+
+
 class Finding(BaseModel):
     """Single actionable finding emitted by an analysis tool."""
 

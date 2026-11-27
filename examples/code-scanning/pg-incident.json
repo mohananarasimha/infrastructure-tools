@@ -1,0 +1,57 @@
+{
+  "source": "synthetic-lab",
+  "collected_at": "2026-11-24 12:00:00+00",
+  "settings": {
+    "server_version": "18.1",
+    "max_connections": 100,
+    "superuser_reserved_connections": 3,
+    "reserved_connections": 0,
+    "idle_in_transaction_session_timeout": "0",
+    "lock_timeout": "0"
+  },
+  "sessions": [
+    {
+      "pid": 10,
+      "backend_type": "client backend",
+      "usename": "app",
+      "datname": "shop",
+      "application_name": "orders-api",
+      "client_addr": null,
+      "state": "idle in transaction",
+      "wait_event_type": null,
+      "wait_event": null,
+      "xact_age_s": 125.0,
+      "query_age_s": null,
+      "state_age_s": 120.0,
+      "query": "UPDATE accounts SET balance = balance - 10 WHERE id = 1",
+      "blocked_by": []
+    },
+    {
+      "pid": 11,
+      "backend_type": "client backend",
+      "usename": "app",
+      "datname": "shop",
+      "application_name": "orders-api",
+      "client_addr": null,
+      "state": "active",
+      "wait_event_type": "Lock",
+      "wait_event": null,
+      "xact_age_s": null,
+      "query_age_s": 4.0,
+      "state_age_s": null,
+      "query": "UPDATE accounts SET balance = balance + 10 WHERE id = 1",
+      "blocked_by": [
+        10
+      ]
+    }
+  ],
+  "lock_waits": [
+    {
+      "pid": 11,
+      "locktype": "transactionid",
+      "mode": "ShareLock",
+      "relation": null,
+      "transactionid": "777"
+    }
+  ]
+}
